@@ -1,0 +1,6 @@
+crawl4ai
+pydantic
+python-dotenv
+beautifulsoup4
+lxml
+aiohttp
