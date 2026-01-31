@@ -3,12 +3,14 @@ Policy Scraper - Main Entry Point
 
 This scraper intelligently extracts company policies and documents from websites.
 It uses LLM only for URL filtering, and traditional parsing for content extraction.
+Scraped data is stored in PostgreSQL with pgvector embeddings for similarity search.
 
 Usage:
     python main.py <URL>                    # Scrape single URL
     python main.py urls.txt                 # Scrape multiple URLs from file
     python main.py <URL> --format json      # Save as JSON only
     python main.py <URL> --format all       # Save in all formats
+    python main.py <URL> --no-db            # Skip database storage (files only)
 """
 
 import sys
@@ -18,7 +20,7 @@ import time
 from datetime import datetime
 from dotenv import load_dotenv
 from scrapers import SitemapParser, URLFilter, ContentExtractor
-from utils import FileHandler, URLUtils
+from utils import FileHandler, URLUtils, DatabaseHandler
 
 # Load environment variables
 load_dotenv()
@@ -26,17 +28,20 @@ load_dotenv()
 class PolicyScraper:
     """Main scraper orchestrator."""
     
-    def __init__(self, output_format='all'):
+    def __init__(self, output_format='all', use_database=True):
         """
         Initialize scraper.
-        
+
         Args:
             output_format: 'json', 'text', 'markdown', or 'all'
+            use_database: Whether to save to PostgreSQL database (default: True)
         """
         self.url_filter = URLFilter()
         self.content_extractor = ContentExtractor()
         self.file_handler = FileHandler()
+        self.db_handler = DatabaseHandler() if use_database else None
         self.output_format = output_format
+        self.use_database = use_database
     
     async def scrape(self, url: str) -> None:
         """
@@ -119,10 +124,21 @@ class PolicyScraper:
         # PHASE 3: Save results
         print("\n💾 PHASE 3: Saving Results")
         print("-" * 80)
-        
+
+        # Save to database if enabled
+        if self.use_database and self.db_handler:
+            print("\n📊 Saving to PostgreSQL database...")
+            db_success = self.db_handler.save_all(scraped_data, url, domain_name, stats)
+            if db_success:
+                print("✅ Successfully saved to database with vector embeddings")
+            else:
+                print("⚠️  Database save failed, data will only be saved to files")
+
+        # Save to files (always save as backup or if database disabled)
+        print("\n📁 Saving to files...")
         if self.output_format == 'all':
             files = self.file_handler.save_all_formats(scraped_data, domain_name, stats)
-            print(f"\n✅ Saved to folder: scraped_data/{domain_name}/")
+            print(f"✅ Saved to folder: scraped_data/{domain_name}/")
             print("\n📄 Files created:")
             for format_name, filepath in files.items():
                 # Get just the filename for cleaner display
@@ -131,19 +147,19 @@ class PolicyScraper:
         elif self.output_format == 'json':
             filepath = self.file_handler.save_json(scraped_data, domain_name)
             summary_path = self.file_handler.save_summary(domain_name, stats)
-            print(f"\n✅ Saved to folder: scraped_data/{domain_name}/")
+            print(f"✅ Saved to folder: scraped_data/{domain_name}/")
             print(f"   - {os.path.basename(filepath)}")
             print(f"   - {os.path.basename(summary_path)}")
         elif self.output_format == 'text':
             filepath = self.file_handler.save_text(scraped_data, domain_name)
             summary_path = self.file_handler.save_summary(domain_name, stats)
-            print(f"\n✅ Saved to folder: scraped_data/{domain_name}/")
+            print(f"✅ Saved to folder: scraped_data/{domain_name}/")
             print(f"   - {os.path.basename(filepath)}")
             print(f"   - {os.path.basename(summary_path)}")
         elif self.output_format == 'markdown':
             filepath = self.file_handler.save_markdown(scraped_data, domain_name)
             summary_path = self.file_handler.save_summary(domain_name, stats)
-            print(f"\n✅ Saved to folder: scraped_data/{domain_name}/")
+            print(f"✅ Saved to folder: scraped_data/{domain_name}/")
             print(f"   - {os.path.basename(filepath)}")
             print(f"   - {os.path.basename(summary_path)}")
         
@@ -166,23 +182,28 @@ async def main():
     if len(sys.argv) < 2:
         print(__doc__)
         sys.exit(1)
-    
+
     # Parse arguments
     arg = sys.argv[1]
     output_format = 'all'
-    
+    use_database = True
+
     if '--format' in sys.argv:
         format_idx = sys.argv.index('--format')
         if format_idx + 1 < len(sys.argv):
             output_format = sys.argv[format_idx + 1]
-    
+
+    if '--no-db' in sys.argv:
+        use_database = False
+        print("ℹ️  Database storage disabled (--no-db flag)")
+
     # Validate format
     if output_format not in ['json', 'text', 'markdown', 'all']:
         print(f"❌ Invalid format: {output_format}")
         print("Valid formats: json, text, markdown, all")
         sys.exit(1)
-    
-    scraper = PolicyScraper(output_format=output_format)
+
+    scraper = PolicyScraper(output_format=output_format, use_database=use_database)
     
     # Start timer
     start_time = time.time()
