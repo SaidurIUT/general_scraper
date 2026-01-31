@@ -1,3 +1,5 @@
+# scrapers/sitemap_parser.py
+
 """Sitemap parser for extracting URLs from sitemap.xml files."""
 import aiohttp
 import xml.etree.ElementTree as ET
