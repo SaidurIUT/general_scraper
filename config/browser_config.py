@@ -1,3 +1,5 @@
+# config/browser_config.py
+
 """Browser configuration for web crawling."""
 from crawl4ai import BrowserConfig
 

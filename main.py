@@ -1,18 +1,7 @@
-"""
-Policy Scraper - Main Entry Point
-
-This scraper intelligently extracts company policies and documents from websites.
-It uses LLM only for URL filtering, and traditional parsing for content extraction.
-
-Usage:
-    python main.py <URL>                    # Scrape single URL
-    python main.py urls.txt                 # Scrape multiple URLs from file
-    python main.py <URL> --format json      # Save as JSON only
-    python main.py <URL> --format all       # Save in all formats
-"""
+# main.py
 
 import sys
-import os
+import argparse
 import asyncio
 import time
 from datetime import datetime
@@ -20,187 +9,102 @@ from dotenv import load_dotenv
 from scrapers import SitemapParser, URLFilter, ContentExtractor
 from utils import FileHandler, URLUtils
 
-# Load environment variables
 load_dotenv()
 
 class PolicyScraper:
-    """Main scraper orchestrator."""
-    
-    def __init__(self, output_format='all'):
-        """
-        Initialize scraper.
+    def __init__(self, args):
+        self.args = args
+        # Check if filter_manual was used. 
+        # args.filter_manual is a list if provided, None if flag not used.
+        is_manual = args.filter_manual is not None
         
-        Args:
-            output_format: 'json', 'text', 'markdown', or 'all'
-        """
-        self.url_filter = URLFilter()
+        self.url_filter = URLFilter(
+            mode="manual" if is_manual else "llm",
+            custom_prompt=args.filter_llm if isinstance(args.filter_llm, str) else None,
+            manual_keywords=args.filter_manual if (is_manual and len(args.filter_manual) > 0) else None
+        )
         self.content_extractor = ContentExtractor()
         self.file_handler = FileHandler()
-        self.output_format = output_format
-    
+
     async def scrape(self, url: str) -> None:
-        """
-        Scrape a single website.
-        
-        Args:
-            url: The website URL to scrape
-        """
-        # Start timing for this website
         scrape_start_time = time.time()
+        domain_name = URLUtils.get_domain_name(url)
         
         print("\n" + "=" * 80)
         print(f"🕷️  Starting scrape for: {url}")
         print("=" * 80)
-        
-        if not URLUtils.is_valid_url(url):
-            print(f"❌ Invalid URL: {url}")
-            return
-        
-        # Get domain name for file naming
-        domain_name = URLUtils.get_domain_name(url)
-        
-        # PHASE 1: Check for sitemap and get URLs
-        print("\n📋 PHASE 1: URL Discovery")
-        print("-" * 80)
-        
+
+        # PHASE 1: URL Discovery
         sitemap_parser = SitemapParser(url)
-        sitemap_urls = await sitemap_parser.get_all_urls()
+        all_urls = await sitemap_parser.get_all_urls()
         
-        if sitemap_urls:
-            print(f"✅ Using sitemap with {len(sitemap_urls)} URLs")
-            relevant_urls = await self.url_filter.filter_from_sitemap(sitemap_urls)
-        else:
-            print("📄 No sitemap found, using homepage links")
-            relevant_urls = await self.url_filter.filter_from_homepage(url)
+        source_name = "Sitemap"
+        if not all_urls or len(all_urls) > self.args.max_sitemap:
+            if len(all_urls) > self.args.max_sitemap:
+                print(f"⚠️  Sitemap too large ({len(all_urls)} URLs). Max limit is {self.args.max_sitemap}.")
+            print("🌐 Falling back to Homepage link extraction...")
+            all_urls = await self.url_filter.get_homepage_links(url)
+            source_name = "Homepage"
+
+        print(f"📋 Found {len(all_urls)} potential links from {source_name}")
         
-        if not relevant_urls:
-            print("\n❌ No relevant URLs found. Try adjusting SEARCH_PROMPT in .env")
-            return
-        
-        print(f"\n✨ Found {len(relevant_urls)} relevant URLs to scrape")
-        
-        # PHASE 2: Extract content from relevant URLs
-        print("\n📥 PHASE 2: Content Extraction")
-        print("-" * 80)
-        
+        relevant_urls = await self.url_filter.filter_urls(all_urls)
+        print(f"✨ {len(relevant_urls)} relevant URLs identified")
+
+        # PHASE 2: Content Extraction
         scraped_data = []
         for idx, target_url in enumerate(relevant_urls, 1):
-            print(f"\n[{idx}/{len(relevant_urls)}]")
-            
+            print(f"📥 [{idx}/{len(relevant_urls)}] Extracting: {target_url}")
             content = await self.content_extractor.extract(target_url)
             if content:
                 scraped_data.append(content)
-        
-        if not scraped_data:
-            print("\n❌ No content extracted")
-            return
-        
-        # Calculate statistics
-        page_types = {}
-        for item in scraped_data:
-            ptype = item.get('page_type', 'Unknown')
-            page_types[ptype] = page_types.get(ptype, 0) + 1
-        
-        total_words = sum(item.get('word_count', 0) for item in scraped_data)
-        scrape_elapsed = time.time() - scrape_start_time
-        
-        # Prepare statistics dictionary
-        stats = {
-            'website': url,
-            'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
-            'urls_discovered': len(sitemap_urls) if sitemap_urls else 'N/A',
-            'relevant_urls': len(relevant_urls),
-            'pages_scraped': len(scraped_data),
-            'total_words': total_words,
-            'page_types': page_types,
-            'total_time': scrape_elapsed
-        }
-        
-        # PHASE 3: Save results
-        print("\n💾 PHASE 3: Saving Results")
-        print("-" * 80)
-        
-        if self.output_format == 'all':
-            files = self.file_handler.save_all_formats(scraped_data, domain_name, stats)
-            print(f"\n✅ Saved to folder: scraped_data/{domain_name}/")
-            print("\n📄 Files created:")
-            for format_name, filepath in files.items():
-                # Get just the filename for cleaner display
-                filename = os.path.basename(filepath)
-                print(f"   - {filename}")
-        elif self.output_format == 'json':
-            filepath = self.file_handler.save_json(scraped_data, domain_name)
-            summary_path = self.file_handler.save_summary(domain_name, stats)
-            print(f"\n✅ Saved to folder: scraped_data/{domain_name}/")
-            print(f"   - {os.path.basename(filepath)}")
-            print(f"   - {os.path.basename(summary_path)}")
-        elif self.output_format == 'text':
-            filepath = self.file_handler.save_text(scraped_data, domain_name)
-            summary_path = self.file_handler.save_summary(domain_name, stats)
-            print(f"\n✅ Saved to folder: scraped_data/{domain_name}/")
-            print(f"   - {os.path.basename(filepath)}")
-            print(f"   - {os.path.basename(summary_path)}")
-        elif self.output_format == 'markdown':
-            filepath = self.file_handler.save_markdown(scraped_data, domain_name)
-            summary_path = self.file_handler.save_summary(domain_name, stats)
-            print(f"\n✅ Saved to folder: scraped_data/{domain_name}/")
-            print(f"   - {os.path.basename(filepath)}")
-            print(f"   - {os.path.basename(summary_path)}")
-        
-        # Print summary
-        print("\n" + "=" * 80)
-        print("📊 SCRAPING SUMMARY")
-        print("=" * 80)
-        print(f"URLs Discovered: {stats['urls_discovered']}")
-        print(f"Relevant URLs: {stats['relevant_urls']}")
-        print(f"Pages Scraped: {stats['pages_scraped']}")
-        print(f"Total Words: {stats['total_words']:,}")
-        print("\nPage Types:")
-        for ptype, count in sorted(page_types.items()):
-            print(f"  - {ptype}: {count}")
-        print("=" * 80)
-        print(f"⏱️  Total time: {scrape_elapsed:.2f} seconds")
+
+        # PHASE 3: Saving
+        if scraped_data:
+            stats = {
+                'website': url,
+                'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                'urls_discovered': len(all_urls),
+                'relevant_urls': len(relevant_urls),
+                'pages_scraped': len(scraped_data),
+                'total_time': time.time() - scrape_start_time
+            }
+            self.file_handler.save_all_formats(scraped_data, domain_name, stats)
+            print(f"\n✅ Success! Files saved in scraped_data/{domain_name}/")
+        else:
+            print("\n❌ No content was extracted from relevant URLs.")
 
 async def main():
-    """Main function."""
-    if len(sys.argv) < 2:
-        print(__doc__)
-        sys.exit(1)
+    parser = argparse.ArgumentParser(description="Policy Scraper v2 - Intelligent & Scalable")
     
-    # Parse arguments
-    arg = sys.argv[1]
-    output_format = 'all'
+    parser.add_argument("target", help="Website URL or .txt file containing URLs")
     
-    if '--format' in sys.argv:
-        format_idx = sys.argv.index('--format')
-        if format_idx + 1 < len(sys.argv):
-            output_format = sys.argv[format_idx + 1]
+    parser.add_argument("--max-sitemap", type=int, default=500, 
+                        help="Max allowed sitemap links before switching to homepage crawl (default: 500)")
     
-    # Validate format
-    if output_format not in ['json', 'text', 'markdown', 'all']:
-        print(f"❌ Invalid format: {output_format}")
-        print("Valid formats: json, text, markdown, all")
-        sys.exit(1)
+    group = parser.add_mutually_exclusive_group()
+    group.add_argument("--filter-llm", nargs='?', const=True, 
+                        help="Use LLM for filtering. Can optionally pass a custom prompt string.")
+    group.add_argument("--filter-manual", nargs='*', 
+                        help="Skip LLM, use keyword filtering. Optional: pass specific keywords to use.")
     
-    scraper = PolicyScraper(output_format=output_format)
+    parser.add_argument("--format", choices=['json', 'text', 'markdown', 'all'], default='all',
+                        help="Output file format")
+
+    args = parser.parse_args()
+
+    scraper = PolicyScraper(args)
     
-    # Start timer
-    start_time = time.time()
-    
-    # Handle file input or single URL
-    if arg.endswith('.txt'):
-        with open(arg, 'r') as f:
+    if args.target.endswith('.txt'):
+        if not os.path.exists(args.target):
+            print(f"❌ File not found: {args.target}")
+            return
+        with open(args.target, 'r') as f:
             urls = [line.strip() for line in f if line.strip()]
-        
-        print(f"📚 Processing {len(urls)} URLs from file")
         for url in urls:
             await scraper.scrape(url)
     else:
-        await scraper.scrape(arg)
-    
-    # Print total time
-    elapsed = time.time() - start_time
-    print(f"\n⏱️  Total time: {elapsed:.2f} seconds")
+        await scraper.scrape(args.target)
 
 if __name__ == "__main__":
     asyncio.run(main())
