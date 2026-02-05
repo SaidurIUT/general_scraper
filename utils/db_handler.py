@@ -11,7 +11,6 @@ import os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from config.db_config import DatabaseConfig
 
-
 class DatabaseHandler:
     """Handle database operations for scraped data with vector embeddings."""
 
@@ -72,7 +71,7 @@ class DatabaseHandler:
             embedding = self.embedding_model.encode(text, convert_to_numpy=True)
             return embedding.tolist()
         except Exception as e:
-            print(f"⚠️  Warning: Could not generate embedding: {e}")
+            print(f" Warning: Could not generate embedding: {e}")
             return None
 
     def save_scrape_session(
