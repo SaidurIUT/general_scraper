@@ -10,6 +10,7 @@ import os
 # Add parent directory to path for imports
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from config.db_config import DatabaseConfig
+from .text_chunker import TextChunker
 
 class DatabaseHandler:
     """Handle database operations for scraped data with vector embeddings."""
@@ -63,11 +64,7 @@ class DatabaseHandler:
             return None
 
         try:
-            # Truncate text if too long (model has token limit)
-            max_length = 5000  # characters
-            if len(text) > max_length:
-                text = text[:max_length]
-
+            # Note: We no longer truncate here - chunking handles long text
             embedding = self.embedding_model.encode(text, convert_to_numpy=True)
             return embedding.tolist()
         except Exception as e:
@@ -92,7 +89,7 @@ class DatabaseHandler:
             Session ID if successful, None otherwise
         """
         if not self.conn:
-            print("❌ No database connection")
+            print(" No database connection")
             return None
 
         try:
@@ -129,7 +126,7 @@ class DatabaseHandler:
         pages: List[Dict]
     ) -> bool:
         """
-        Save scraped pages with vector embeddings.
+        Save scraped pages with vector embeddings using semantic chunking.
 
         Args:
             session_id: ID of the scrape session
@@ -145,29 +142,47 @@ class DatabaseHandler:
         try:
             cursor = self.conn.cursor()
 
-            # Prepare data with embeddings
-            print(f"🔄 Generating embeddings for {len(pages)} pages...")
+            # Prepare data with embeddings and chunking
+            print(f"🔄 Chunking and generating embeddings for {len(pages)} pages...")
             rows = []
-            for idx, page in enumerate(pages, 1):
-                # Generate embedding for content
+            total_chunks = 0
+
+            for page_idx, page in enumerate(pages, 1):
                 content = page.get('content', '')
-                embedding = self._generate_embedding(content)
 
-                rows.append((
-                    session_id,
-                    page.get('url'),
-                    page.get('title'),
-                    page.get('description'),
-                    page.get('page_type'),
-                    content,
-                    page.get('word_count'),
-                    embedding
-                ))
+                # Chunk the content semantically
+                chunks = TextChunker.semantic_chunk(content, chunk_size=1000, overlap=200)
+                total_chunks += len(chunks)
 
-                if idx % 10 == 0 or idx == len(pages):
-                    print(f"   Generated {idx}/{len(pages)} embeddings...")
+                # Process each chunk
+                for chunk_idx, chunk in enumerate(chunks, 1):
+                    # Generate embedding for this chunk
+                    embedding = self._generate_embedding(chunk)
 
-            # Batch insert all pages
+                    # Modify title to indicate chunking (if multiple chunks)
+                    original_title = page.get('title', 'Untitled')
+                    if len(chunks) > 1:
+                        title = f"{original_title} [Chunk {chunk_idx}/{len(chunks)}]"
+                        description = f"Part {chunk_idx} of {len(chunks)}"
+                    else:
+                        title = original_title
+                        description = page.get('description', '')
+
+                    rows.append((
+                        session_id,
+                        page.get('url'),
+                        title,
+                        description,
+                        page.get('page_type'),
+                        chunk,  # Store chunk, not full content
+                        len(chunk.split()),  # Word count for this chunk
+                        embedding
+                    ))
+
+                if page_idx % 5 == 0 or page_idx == len(pages):
+                    print(f"   Processed {page_idx}/{len(pages)} pages ({total_chunks} chunks so far)...")
+
+            # Batch insert all chunks
             execute_values(
                 cursor,
                 """
@@ -183,7 +198,7 @@ class DatabaseHandler:
             self.conn.commit()
             cursor.close()
 
-            print(f"✅ Saved {len(pages)} pages to database")
+            print(f"✅ Saved {len(pages)} pages as {total_chunks} chunks to database")
             return True
 
         except Exception as e:
