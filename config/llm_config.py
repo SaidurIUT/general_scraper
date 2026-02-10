@@ -4,7 +4,6 @@
 import os
 
 def get_llm_config():
-    """Configure the LLM for URL filtering."""
     base_url = os.getenv("OLLAMA_BASE_URL", "http://10.112.30.10:11434")
     model = os.getenv("OLLAMA_MODEL", "ollama/phi4-mini-reasoning")
     
@@ -14,8 +13,11 @@ def get_llm_config():
     }
 
 def get_default_search_prompt():
-    """Get the default search prompt for URL filtering."""
     return os.getenv("SEARCH_PROMPT", (
-        "Find URLs related to company policies, privacy policy, terms of service, "
-        "data protection, cookie policy, acceptable use policy, and compliance documents."
+        "Build a comprehensive knowledge base for a website chatbot. "
+        "Include pages about company information, services, locations, contact details, "
+        "policies (privacy, terms, legal), support resources, FAQ, documentation, "
+        "about pages, team information, news, blog posts, and any informational content "
+        "that helps answer user questions. Exclude individual product listings, "
+        "user account pages, shopping carts, and search/filter results."
     ))

@@ -1,332 +1,471 @@
-# Policy Scraper
+# 🤖 Knowledge Base Scraper for Website Chatbots
 
-A smart web scraper that uses LLM only for intelligent URL filtering, while traditional parsing handles content extraction. Perfect for extracting company policies, terms of service, privacy policies, and other documentation.
+A powerful, intelligent web scraper designed to build comprehensive knowledge bases from websites for chatbot applications. Uses smart URL discovery (sitemap → BFS → homepage), LLM-powered filtering, and PostgreSQL with vector embeddings for semantic search.
 
-## 🎯 Features
+## 🎯 Purpose
 
-- **Smart URL Discovery**: Automatically finds sitemap.xml or scrapes homepage links
-- **LLM-Powered Filtering**: Uses AI to identify relevant policy pages
-- **Traditional Parsing**: Fast, reliable content extraction without LLM overhead
-- **Multiple Output Formats**: JSON, Text, and Markdown
-- **Modular Architecture**: Easy to extend and customize
-- **Batch Processing**: Process multiple websites from a file
+Build a complete knowledge base from any website to power chatbots that can answer questions about:
+- Company information and background
+- Services and offerings  
+- Locations and contact details
+- Policies (privacy, terms, legal)
+- Support resources and FAQs
+- Team and leadership
+- News and updates
+- Any other informational content
 
-## 📋 How It Works
+**Note:** This scraper focuses on **static informational content** and excludes:
+- Individual product listings (dynamic/frequently changing)
+- Shopping carts and checkouts
+- User account pages
+- Search results and filters
 
-1. **URL Discovery**: Checks for sitemap.xml, falls back to homepage links
-2. **LLM Filtering**: AI selects only relevant URLs based on your search criteria
-3. **Content Extraction**: Traditional BeautifulSoup parsing extracts clean text
-4. **Smart Cleaning**: Removes navigation, footers, ads automatically
-5. **Multi-Format Export**: Saves as JSON, readable text, and Markdown
+## 🏗️ Architecture
 
-## 🚀 Quick Start
+```
+┌─────────────────────────────────────────────────────────────┐
+│                     URL DISCOVERY                            │
+├─────────────────────────────────────────────────────────────┤
+│  1. Sitemap.xml → 2. BFS Crawling → 3. Homepage Links       │
+│                                                               │
+│  ✅ Sitemap: Fast, complete coverage (if available)         │
+│  ✅ BFS: Comprehensive crawling (depth & breadth control)   │
+│  ✅ Homepage: Quick fallback                                │
+└─────────────────────────────────────────────────────────────┘
+                            ↓
+┌─────────────────────────────────────────────────────────────┐
+│                     URL FILTERING                            │
+├─────────────────────────────────────────────────────────────┤
+│  Pre-filter: Remove carts, search, user pages                │
+│  Main filter: LLM or keyword-based                           │
+│                                                               │
+│  LLM Mode: Intelligent context-aware filtering               │
+│  Manual Mode: Fast keyword matching                          │
+└─────────────────────────────────────────────────────────────┘
+                            ↓
+┌─────────────────────────────────────────────────────────────┐
+│                  CONTENT EXTRACTION                          │
+├─────────────────────────────────────────────────────────────┤
+│  • Extract main content (remove nav, footer, ads)           │
+│  • Detect page type (About, Contact, Policy, etc.)          │
+│  • Clean and structure text                                 │
+│  • Calculate metadata (word count, etc.)                    │
+└─────────────────────────────────────────────────────────────┘
+                            ↓
+┌─────────────────────────────────────────────────────────────┐
+│                        STORAGE                               │
+├─────────────────────────────────────────────────────────────┤
+│  PostgreSQL + pgvector: Semantic search with embeddings     │
+│  Files: JSON, Markdown, Text formats                        │
+└─────────────────────────────────────────────────────────────┘
+```
 
-### 1. Setup
+## 📦 Features
+
+- **🔍 Smart URL Discovery**: Sitemap → BFS → Homepage fallback
+- **🤖 LLM-Powered Filtering**: Intelligent URL selection using local LLM (Ollama)
+- **⚙️ Manual Keyword Mode**: Fast filtering without LLM dependency
+- **🌊 BFS Crawling**: Configurable depth and page limits
+- **🎯 Content Extraction**: Removes noise, extracts main content
+- **🗄️ PostgreSQL + pgvector**: Store with semantic embeddings for RAG
+- **📁 Multiple Formats**: JSON, Markdown, Text outputs
+- **🚀 Async/Concurrent**: Fast parallel processing
+- **📊 Detailed Statistics**: Track discovery, filtering, and extraction metrics
+
+## 🛠️ Installation
+
+### Prerequisites
 
 ```bash
-# Create project directory
-mkdir policy-scraper
-cd policy-scraper
+# Python 3.8+
+python --version
+
+# PostgreSQL with pgvector extension
+psql --version
+
+# Ollama (for LLM filtering)
+ollama --version
+```
+
+### Setup
+
+```bash
+# Clone repository
+git clone <your-repo-url>
+cd knowledge-base-scraper
 
 # Create virtual environment
 python -m venv venv
+source venv/bin/activate  # On Windows: venv\Scripts\activate
 
-# Activate virtual environment
-# Linux/Mac:
-source venv/bin/activate
-# Windows:
-# venv\Scripts\activate
-
-# Create directory structure
-mkdir config models scrapers utils scraped_data
-touch config/__init__.py models/__init__.py scrapers/__init__.py utils/__init__.py
-```
-
-### 2. Install Dependencies
-
-Create `requirements.txt`:
-```
-crawl4ai
-pydantic
-python-dotenv
-beautifulsoup4
-lxml
-aiohttp
-```
-
-Install:
-```bash
+# Install dependencies
 pip install -r requirements.txt
+
+# Install Playwright browsers (required for crawl4ai)
+playwright install chromium
 ```
 
-### 3. Configure
+### Configuration
 
-Edit `.env` file:
+Create a `.env` file:
+
 ```env
-# LLM Configuration
-OLLAMA_BASE_URL=http://10.112.30.10:11434
+# Database Configuration
+DB_HOST=localhost
+DB_PORT=5432
+DB_NAME=scraper_db
+DB_USER=postgres
+DB_PASSWORD=your_password
+
+# LLM Configuration (Ollama)
+OLLAMA_BASE_URL=http://localhost:11434
 OLLAMA_MODEL=ollama/phi4-mini-reasoning
 
-# Search Prompt (customize for your needs)
-SEARCH_PROMPT=Find URLs related to company policies, privacy policy, terms of service, data protection, cookie policy, acceptable use policy, and compliance documents.
+# Embedding Model
+EMBEDDING_MODEL=all-MiniLM-L6-v2
+
+# Custom Search Prompt (optional)
+SEARCH_PROMPT="Build comprehensive knowledge base..."
 ```
 
-### 4. Run
+### Database Setup
+
+```sql
+-- Create database
+CREATE DATABASE scraper_db;
+
+-- Connect to database
+\c scraper_db
+
+-- Enable pgvector extension
+CREATE EXTENSION IF NOT EXISTS vector;
+
+-- Tables are created automatically on first run
+```
+
+## 🚀 Usage
+
+### Basic Usage
 
 ```bash
-# Scrape single website
-python main.py https://www.anthropic.com
+# Scrape a website (uses sitemap → BFS → homepage)
+python main.py https://example.com
 
-# Scrape multiple websites
+# Scrape with custom BFS limits
+python main.py https://example.com --max-pages 500 --max-depth 4
+
+# Use BFS only (skip sitemap)
+python main.py https://example.com --bfs-only
+
+# Use manual keyword filtering (faster, no LLM)
+python main.py https://example.com --filter-manual
+
+# Skip database storage (files only)
+python main.py https://example.com --no-db
+
+# Save only JSON format
+python main.py https://example.com --format json
+```
+
+### Advanced Examples
+
+```bash
+# Large website with aggressive crawling
+python main.py https://bigcompany.com \
+  --max-pages 1000 \
+  --max-depth 5 \
+  --max-sitemap 1000
+
+# Quick scrape for small site
+python main.py https://smallsite.com \
+  --max-pages 50 \
+  --max-depth 2 \
+  --no-db
+
+# Manual filtering with custom keywords
+python main.py https://example.com \
+  --filter-manual about team contact faq
+
+# LLM filtering with custom prompt
+python main.py https://example.com \
+  --filter-llm "Find pages about company culture and values"
+
+# Batch processing from file
 python main.py urls.txt
-
-# Save as JSON only
-python main.py https://www.anthropic.com --format json
-
-# Save in all formats (default)
-python main.py https://www.anthropic.com --format all
 ```
 
-## 📁 Project Structure
+### URL File Format (urls.txt)
 
 ```
-policy-scraper/
-├── .env                          # Configuration
-├── requirements.txt              # Dependencies
-├── main.py                       # Entry point
-├── urls.txt                      # Example URL list
-│
-├── config/                       # Configuration modules
-│   ├── __init__.py
-│   ├── browser_config.py        # Browser settings
-│   └── llm_config.py            # LLM settings
-│
-├── models/                       # Data models
-│   ├── __init__.py
-│   └── schemas.py               # Pydantic schemas
-│
-├── scrapers/                     # Core scraping logic
-│   ├── __init__.py
-│   ├── sitemap_parser.py        # Sitemap.xml parser
-│   ├── url_filter.py            # LLM-based URL filtering
-│   └── content_extractor.py     # Content extraction
-│
-├── utils/                        # Utilities
-│   ├── __init__.py
-│   ├── file_handler.py          # File I/O operations
-│   └── url_utils.py             # URL manipulation
-│
-└── scraped_data/                 # Output directory
-    ├── anthropic.json
-    ├── anthropic.txt
-    └── anthropic.md
+https://company1.com
+https://company2.com
+https://company3.com
 ```
 
-## 🎨 Customization
+## 📊 Output Structure
 
-### Change Search Criteria
-
-Edit `.env`:
-```env
-SEARCH_PROMPT=Find URLs related to investor relations, financial reports, annual reports, and SEC filings.
+```
+scraped_data/
+└── example/
+    ├── example.json        # Structured JSON data
+    ├── example.md          # Markdown format
+    ├── example.txt         # Plain text format
+    └── summary.txt         # Scraping statistics
 ```
 
-### Change LLM Provider
+### JSON Output Example
 
-Edit `.env`:
-```env
-OLLAMA_BASE_URL=http://localhost:11434
-OLLAMA_MODEL=ollama/llama3.2
-```
-
-### Adjust Browser Visibility
-
-Edit `config/browser_config.py`:
-```python
-headless=False  # Show browser UI (useful for debugging)
-```
-
-### Customize Content Cleaning
-
-Edit `scrapers/content_extractor.py` in the `_extract_main_content()` method to add/remove HTML elements.
-
-## 📊 Output Formats
-
-All files are saved in website-specific folders: `scraped_data/website_name/`
-
-### JSON Format (website_name.json)
 ```json
 [
   {
-    "url": "https://example.com/privacy",
-    "title": "Privacy Policy",
-    "description": "Our privacy policy",
-    "page_type": "Privacy Policy",
-    "content": "Full text content...",
-    "word_count": 1234
+    "url": "https://example.com/about",
+    "title": "About Us - Example Company",
+    "description": "Learn about our mission and team",
+    "page_type": "About Us",
+    "content": "We are a company that...",
+    "word_count": 450
+  },
+  {
+    "url": "https://example.com/contact",
+    "title": "Contact Us",
+    "description": "Get in touch with our team",
+    "page_type": "Contact",
+    "content": "Our offices are located...",
+    "word_count": 200
   }
 ]
 ```
 
-### Text Format (website_name.txt)
-Clean, readable text file with clear sections for each page.
+## ⚙️ Configuration Options
 
-### Markdown Format (website_name.md)
-Well-formatted Markdown with headers, links, and metadata.
+### URL Discovery
 
-### Summary File (summary.txt)
-Scraping statistics including:
-```
-📊 SCRAPING SUMMARY
-================================================================================
-Website: https://example.com
-Scraped: 2024-01-29 10:30:00
-URLs Discovered: 150
-Relevant URLs: 8
-Pages Scraped: 8
-Total Words: 15,234
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `--max-sitemap` | 500 | Max sitemap URLs before switching to BFS |
+| `--max-pages` | 200 | Maximum pages to crawl with BFS |
+| `--max-depth` | 3 | Maximum crawl depth for BFS |
+| `--bfs-only` | False | Skip sitemap, use BFS only |
 
-Page Types:
-  - Privacy Policy: 1
-  - Terms of Service: 1
-  - Cookie Policy: 1
-================================================================================
-⏱️  Total time: 45.23 seconds
-```
+### Filtering
 
-## 🔧 Advanced Usage
+| Parameter | Description |
+|-----------|-------------|
+| `--filter-llm` | Use LLM filtering (default, requires Ollama) |
+| `--filter-llm "prompt"` | LLM with custom prompt |
+| `--filter-manual` | Keyword filtering (no LLM needed) |
+| `--filter-manual kw1 kw2` | Manual with custom keywords |
 
-### Process Multiple Sites
-Create `urls.txt`:
-```
-https://www.anthropic.com
-https://openai.com
-https://www.google.com
-```
+### Output
 
-Run:
-```bash
-python main.py urls.txt
-```
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `--format` | all | Output format: json, text, markdown, all |
+| `--no-db` | False | Skip database storage |
 
-### Custom Page Type Detection
+## 🎯 Filtering Logic
 
-Edit `scrapers/content_extractor.py` in `_detect_page_type()`:
+### Pre-filtering (Automatic)
+
+Always excludes:
+- Shopping carts and checkouts
+- User account pages
+- Search results and filters
+- Login/signup pages
+- API endpoints
+- Media downloads
+- Social redirects
+
+### LLM Filtering
+
+Uses local LLM (Ollama) to intelligently identify informational pages:
+
 ```python
-patterns = {
-    'Privacy Policy': ['privacy', 'privacy-policy'],
-    'Your Custom Type': ['custom', 'keyword'],
-}
+# Includes:
+- Company information
+- Services/offerings
+- Locations and contact
+- Policies and legal
+- Support and FAQ
+- News and blog
+
+# Excludes:
+- Individual products
+- Dynamic content
+- User-specific pages
 ```
 
-## 🐛 Troubleshooting
+### Manual Keyword Filtering
 
-### LLM Connection Issues
-- Check `OLLAMA_BASE_URL` in `.env`
-- Verify Ollama is running: `curl http://10.112.30.10:11434`
-- Test model: `ollama run phi4-mini-reasoning`
+Fast pattern matching on URLs using keywords:
 
-### No URLs Found
-- Check if sitemap.xml exists manually
-- Verify SEARCH_PROMPT matches the content you're looking for
-- Try with `headless=False` to see what the browser sees
-
-### Empty Content
-- Some sites use JavaScript rendering - check browser view
-- Adjust content selectors in `content_extractor.py`
-- Check if site blocks automated access
-
-## 🔍 How LLM is Used
-
-The LLM is used **ONLY** for URL filtering:
-
-1. **Input**: List of URLs from sitemap or homepage
-2. **Task**: Identify which URLs match the search criteria
-3. **Output**: Filtered list of relevant URLs
-4. **Fallback**: Keyword matching if LLM fails
-
-Content extraction uses traditional BeautifulSoup parsing - no LLM needed!
-
-## 📝 Example Output
-
-```
-🕷️  Starting scrape for: https://www.anthropic.com
-
-📋 PHASE 1: URL Discovery
-✅ Found sitemap: https://www.anthropic.com/sitemap.xml
-📄 Parsed 150 URLs from sitemap
-🤖 LLM selected 8 URLs
-💭 Reasoning: Selected URLs containing privacy, terms, legal...
-
-📥 PHASE 2: Content Extraction
-[1/8] 📥 Extracting: https://www.anthropic.com/privacy
-      ✅ Extracted: Privacy Policy (2,341 words)
-[2/8] 📥 Extracting: https://www.anthropic.com/terms
-      ✅ Extracted: Terms of Service (1,876 words)
-
-💾 PHASE 3: Saving Results
-✅ Saved to folder: scraped_data/anthropic/
-
-📄 Files created:
-   - anthropic.json
-   - anthropic.txt
-   - anthropic.md
-   - summary.txt
-
-📊 SCRAPING SUMMARY
-================================================================================
-URLs Discovered: 150
-Relevant URLs: 8
-Pages Scraped: 8
-Total Words: 15,234
-
-Page Types:
-  - Privacy Policy: 1
-  - Terms of Service: 1
-  - Cookie Policy: 1
-  - About Us: 1
-  - Contact: 1
-  - Legal: 3
-================================================================================
-⏱️  Total time: 45.23 seconds
+```python
+keywords = [
+    'about', 'contact', 'faq', 'help', 'support',
+    'privacy', 'terms', 'legal', 'policy',
+    'location', 'office', 'team', 'services',
+    'news', 'blog', 'press'
+    # ... and more
+]
 ```
 
-### Output Folder Structure
+## 🗄️ Database Schema
+
+```sql
+-- Websites table
+CREATE TABLE websites (
+    id SERIAL PRIMARY KEY,
+    url TEXT UNIQUE NOT NULL,
+    domain_name TEXT NOT NULL,
+    scraped_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    stats JSONB
+);
+
+-- Pages table with vector embeddings
+CREATE TABLE pages (
+    id SERIAL PRIMARY KEY,
+    website_id INTEGER REFERENCES websites(id),
+    url TEXT UNIQUE NOT NULL,
+    title TEXT,
+    description TEXT,
+    page_type TEXT,
+    content TEXT,
+    word_count INTEGER,
+    embedding vector(384),  -- 384-dimensional for all-MiniLM-L6-v2
+    scraped_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Indexes for fast search
+CREATE INDEX idx_pages_website ON pages(website_id);
+CREATE INDEX idx_pages_embedding ON pages USING ivfflat (embedding vector_cosine_ops);
+```
+
+## 🔧 Troubleshooting
+
+### LLM Filtering Fails
+
+```bash
+# Use manual keyword filtering
+python main.py https://example.com --filter-manual
+
+# Check Ollama is running
+ollama list
+ollama pull phi4-mini-reasoning
+```
+
+### Database Connection Issues
+
+```bash
+# Check PostgreSQL is running
+sudo systemctl status postgresql
+
+# Verify pgvector extension
+psql -d scraper_db -c "SELECT * FROM pg_extension WHERE extname = 'vector';"
+
+# Run without database
+python main.py https://example.com --no-db
+```
+
+### BFS Crawling Too Slow
+
+```bash
+# Reduce limits
+python main.py https://example.com --max-pages 50 --max-depth 2
+
+# Use sitemap instead
+python main.py https://example.com  # Auto-detects sitemap
+
+# Use homepage links only
+# (Set very low limits to trigger fallback)
+python main.py https://example.com --max-sitemap 10 --max-pages 1
+```
+
+## 🎓 Use Cases
+
+### 1. Customer Support Chatbot
+Scrape company website for FAQ, support docs, policies:
+```bash
+python main.py https://support.company.com --max-depth 4
+```
+
+### 2. Internal Knowledge Base
+Build searchable knowledge base from internal docs:
+```bash
+python main.py https://internal.company.com \
+  --filter-manual docs guide how-to tutorial
+```
+
+### 3. Competitive Analysis
+Gather public information from competitor sites:
+```bash
+python main.py urls.txt --format all --no-db
+```
+
+### 4. RAG Pipeline
+Generate embeddings for retrieval-augmented generation:
+```bash
+python main.py https://example.com
+# Data is stored in PostgreSQL with pgvector embeddings
+# Query with: SELECT * FROM pages ORDER BY embedding <=> query_vector LIMIT 5
+```
+
+## 📝 Development
+
+### Project Structure
 
 ```
-scraped_data/
-├── anthropic/
-│   ├── anthropic.json      # Structured data
-│   ├── anthropic.txt       # Readable text
-│   ├── anthropic.md        # Markdown format
-│   └── summary.txt         # Scraping statistics
-└── openai/
-    ├── openai.json
-    ├── openai.txt
-    ├── openai.md
-    └── summary.txt
+.
+├── config/
+│   ├── browser_config.py    # Playwright/browser settings
+│   ├── llm_config.py         # Ollama LLM configuration
+│   └── db_config.py          # PostgreSQL configuration
+├── scrapers/
+│   ├── sitemap_parser.py     # Sitemap.xml parsing
+│   ├── bfs_crawler.py        # BFS web crawling
+│   ├── url_filter.py         # LLM/keyword filtering
+│   └── content_extractor.py  # Content extraction
+├── utils/
+│   ├── file_handler.py       # File I/O operations
+│   ├── url_utils.py          # URL utilities
+│   └── db_handler.py         # Database operations
+├── models/
+│   └── schemas.py            # Pydantic models
+├── main.py                   # Main entry point
+└── README.md
 ```
 
-## 🤝 Contributing
+## 🔮 Future Enhancements
 
-Feel free to extend this scraper:
-- Add new output formats
-- Improve content extraction
-- Add more page type patterns
-- Enhance error handling
+- [ ] Support for JavaScript-heavy SPAs
+- [ ] PDF and document extraction
+- [ ] Image and video content analysis
+- [ ] Multi-language support
+- [ ] Incremental updates (detect changes)
+- [ ] Cloud storage integration (S3, GCS)
+- [ ] GraphQL/REST API endpoint
+- [ ] Web UI for configuration and monitoring
+- [ ] Docker containerization
+- [ ] Distributed crawling with Celery
 
 ## 📄 License
 
-MIT License - feel free to use and modify!
+MIT License - feel free to use for any purpose
 
-## 💡 Tips
+## 🤝 Contributing
 
-1. **Start small**: Test with one URL before batch processing
-2. **Check outputs**: Review JSON/TXT to verify quality
-3. **Customize prompts**: Adjust SEARCH_PROMPT for different use cases
-4. **Debug mode**: Set `headless=False` to see browser behavior
-5. **Rate limiting**: Add delays between requests for large batches
+Contributions welcome! Please:
+1. Fork the repository
+2. Create a feature branch
+3. Make your changes
+4. Submit a pull request
+
+## 💬 Support
+
+For issues and questions:
+- Open a GitHub issue
+- Check existing issues for solutions
+- Review the troubleshooting section
 
 ---
 
-Built with ❤️ using crawl4ai, BeautifulSoup, and minimal LLM usage for maximum efficiency!
+**Built for creating intelligent, context-aware chatbots 🤖**

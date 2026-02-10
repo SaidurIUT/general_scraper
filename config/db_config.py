@@ -1,3 +1,5 @@
+#config/db_config.py
+
 """Database configuration for PostgreSQL with pgvector."""
 import os
 from dotenv import load_dotenv
