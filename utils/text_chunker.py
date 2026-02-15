@@ -27,6 +27,7 @@ class TextChunker:
             return [text] if text else []
 
         # Split by paragraphs first (double newline or single newline)
+        
         paragraphs = re.split(r'\n\s*\n|\n', text)
 
         chunks = []
