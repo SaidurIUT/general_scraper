@@ -20,6 +20,7 @@ from langchain_core.callbacks import CallbackManagerForRetrieverRun
 from langchain_ollama import OllamaLLM
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
+from langchain_community.tools import DuckDuckGoSearchRun
 
 from langgraph.graph import StateGraph, END
 from langgraph.graph.message import add_messages
@@ -134,34 +135,89 @@ def route_query(state: GraphState) -> GraphState:
 
 
 def handle_google_search(state: GraphState) -> GraphState:
-    """Node: Handle Google search routing."""
+    """Node: Handle web search using DuckDuckGo and generate answer with LLM."""
+    question = state["question"]
+    verbose = state["verbose"]
+    
     print("=" * 80)
-    print("ROUTING DECISION: GOOGLE SEARCH REQUIRED")
+    print("ROUTING DECISION: WEB SEARCH")
     print("=" * 80)
     print(f"Confidence too low: {state['highest_similarity']:.4f} < {state['routing_threshold']:.4f}")
-    print("\nThis question appears to be outside the scope of available policy documents.")
-    print("A Google search would provide better results.")
-    print("\n(Google search integration not yet implemented)")
+    print("\nSearching the web for relevant information...")
     print("=" * 80)
+    print()
 
-    all_docs = state["documents"]
-    verbose = state["verbose"]
-
-    if verbose:
-        print("\nTop documents found (but below routing threshold):")
-        for idx, doc in enumerate(all_docs[:3], 1):
-            print(f"{idx}. {doc.metadata['title']}")
-            print(f"   Similarity: {doc.metadata['similarity']:.4f} ({doc.metadata['similarity']:.2%})")
-            print(f"   URL: {doc.metadata['url']}")
+    # Perform DuckDuckGo search
+    try:
+        search = DuckDuckGoSearchRun()
+        search_results = search.run(question)
+        
+        if verbose:
+            print("Search Results:")
+            print("-" * 40)
+            print(search_results)
+            print("-" * 40)
             print()
-        print("=" * 80)
-    else:
-        print("\nTop 3 similarity scores:")
-        for idx, doc in enumerate(all_docs[:3], 1):
-            print(f"{idx}. {doc.metadata['title']}: {doc.metadata['similarity']:.4f} ({doc.metadata['similarity']:.2%})")
-        print("=" * 80)
+        
+        # Generate answer using LLM
+        print("Generating answer with LLM...\n")
+        
+        ollama_base_url = os.getenv("OLLAMA_BASE_URL", "http://10.112.30.10:11434")
+        ollama_model = os.getenv("OLLAMA_MODEL", "glm-4.7-flash:latest").replace("ollama/", "")
+        
+        llm = OllamaLLM(
+            base_url=ollama_base_url,
+            model=ollama_model,
+            temperature=0.7,
+        )
+        
+        template = """You are a helpful assistant that answers questions based on web search results.
 
-    return state
+Use the following search results to answer the question.
+
+Search Results:
+{context}
+
+Question: {question}
+
+Instructions:
+- Answer based on the search results provided
+- Be concise but informative
+- If the search results don't contain enough information, say so clearly
+- Mention that this information comes from web search
+
+Answer:"""
+        
+        prompt = ChatPromptTemplate.from_template(template)
+        chain = prompt | llm | StrOutputParser()
+        answer = chain.invoke({"context": search_results, "question": question})
+        
+        print("=" * 80)
+        print("ANSWER (from Web Search)")
+        print("=" * 80)
+        print(answer)
+        print("=" * 80)
+        
+        return {
+            **state,
+            "answer": answer
+        }
+        
+    except Exception as e:
+        print(f"Web search failed: {e}")
+        print("\nFalling back to showing top RAG documents...")
+        
+        all_docs = state["documents"]
+        if all_docs:
+            print("\nTop documents found (below routing threshold):")
+            for idx, doc in enumerate(all_docs[:3], 1):
+                print(f"{idx}. {doc.metadata['title']}")
+                print(f"   Similarity: {doc.metadata['similarity']:.4f} ({doc.metadata['similarity']:.2%})")
+                print(f"   URL: {doc.metadata['url']}")
+                print()
+        print("=" * 80)
+        
+        return state
 
 
 def handle_rag(state: GraphState) -> GraphState:
@@ -205,7 +261,7 @@ def handle_rag(state: GraphState) -> GraphState:
 
     # Initialize Ollama LLM
     ollama_base_url = os.getenv("OLLAMA_BASE_URL", "http://10.112.30.10:11434")
-    ollama_model = os.getenv("OLLAMA_MODEL", "ollama/phi4-mini-reasoning").replace("ollama/", "")
+    ollama_model = os.getenv("OLLAMA_MODEL", "glm-4.7-flash:latest").replace("ollama/", "")
 
     llm = OllamaLLM(
         base_url=ollama_base_url,
