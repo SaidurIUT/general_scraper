@@ -10,3 +10,6 @@ sentence-transformers
 langchain
 langchain-community
 langchain-ollama
+langgraph
+duckduckgo-search
+ddgs

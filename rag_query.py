@@ -1,6 +1,11 @@
 #!/usr/bin/env python3
 """
-RAG (Retrieval-Augmented Generation) Query System using LangChain
+Intelligent Query Routing System with RAG and Google Search
+
+Routes user questions intelligently:
+- Computes similarity with RAG documents
+- If similarity >= threshold: Answer with RAG (policy documents)
+- If similarity < threshold: Indicate Google search is needed
 """
 
 import sys
@@ -128,46 +133,104 @@ Answer:"""
     return rag_chain, retriever
 
 
-def ask_question(question: str, threshold: float = 0.5, limit: int = 5, verbose: bool = False):
+def ask_question(
+    question: str,
+    threshold: float = 0.5,
+    limit: int = 5,
+    verbose: bool = False,
+    routing_threshold: float = 0.75
+):
     """
-    Ask a question and get an AI-generated answer using RAG.
+    Ask a question with intelligent routing between RAG and Google search.
 
     Args:
         question: The question to ask
         threshold: Minimum similarity score for retrieval (0-1)
         limit: Maximum number of documents to retrieve
         verbose: Show retrieved documents and sources
+        routing_threshold: Similarity threshold for routing decision (default: 0.75)
+                          If highest similarity >= routing_threshold, use RAG
+                          If highest similarity < routing_threshold, suggest Google search
     """
     print("=" * 80)
-    print("RAG QUERY SYSTEM (LangChain)")
+    print("INTELLIGENT QUERY ROUTING SYSTEM")
     print("=" * 80)
     print(f"Question: {question}")
     print("=" * 80)
     print()
 
     try:
-        # Create RAG chain
-        print("Initializing RAG chain...")
-        rag_chain, retriever = create_rag_chain(threshold=threshold, k=limit)
+        # Step 1: Get documents with very low threshold to see all similarity scores
+        print("Step 1: Computing similarity with RAG documents...")
 
-        # Retrieve documents (for verbose mode)
-        print("Retrieving relevant documents...")
-        docs = retriever.invoke(question)
+        # Create retriever with threshold=0 to get all documents with their similarity scores
+        retriever_all = PgVectorRetriever(threshold=0.0, k=limit)
+        all_docs = retriever_all.invoke(question)
 
-        if not docs:
-            print("No relevant documents found")
-            print("\nTips:")
-            print("- Try lowering the threshold (--threshold 0.3)")
-            print("- Make sure data has been scraped to the database")
-            print("- Try rephrasing your question")
+        if not all_docs:
+            print("\nNo documents found in knowledge base")
+            print("Database might be empty - scrape some data first")
+            print("=" * 80)
             return
 
-        print(f"Retrieved {len(docs)} relevant documents\n")
+        # Get highest similarity score
+        highest_similarity = max(doc.metadata['similarity'] for doc in all_docs)
+
+        print(f"Retrieved {len(all_docs)} documents")
+        print(f"Highest similarity score: {highest_similarity:.4f} ({highest_similarity:.2%})")
+        print(f"Routing threshold: {routing_threshold:.4f} ({routing_threshold:.2%})")
+        print()
+
+        # ROUTING DECISION
+        if highest_similarity < routing_threshold:
+            print("=" * 80)
+            print("ROUTING DECISION: GOOGLE SEARCH REQUIRED")
+            print("=" * 80)
+            print(f"Confidence too low: {highest_similarity:.4f} < {routing_threshold:.4f}")
+            print("\nThis question appears to be outside the scope of available policy documents.")
+            print("A Google search would provide better results.")
+            print("\n(Google search integration not yet implemented)")
+            print("=" * 80)
+
+            if verbose:
+                print("\nTop documents found (but below routing threshold):")
+                for idx, doc in enumerate(all_docs[:3], 1):
+                    print(f"{idx}. {doc.metadata['title']}")
+                    print(f"   Similarity: {doc.metadata['similarity']:.4f} ({doc.metadata['similarity']:.2%})")
+                    print(f"   URL: {doc.metadata['url']}")
+                    print()
+                print("=" * 80)
+            else:
+                print("\nTop 3 similarity scores:")
+                for idx, doc in enumerate(all_docs[:3], 1):
+                    print(f"{idx}. {doc.metadata['title']}: {doc.metadata['similarity']:.4f} ({doc.metadata['similarity']:.2%})")
+                print("=" * 80)
+            return
+
+        # Proceed with RAG - filter documents by retrieval threshold
+        docs = [doc for doc in all_docs if doc.metadata['similarity'] >= threshold]
+
+        if not docs:
+            print("=" * 80)
+            print("WARNING: Similarity above routing threshold but below retrieval threshold")
+            print("=" * 80)
+            print(f"Highest similarity: {highest_similarity:.4f} >= {routing_threshold:.4f} (routing)")
+            print(f"But all documents below retrieval threshold: {threshold:.4f}")
+            print("\nConsider lowering the retrieval threshold parameter")
+            print("=" * 80)
+            return
+
+        print("=" * 80)
+        print("ROUTING DECISION: USING RAG SYSTEM")
+        print("=" * 80)
+        print(f"Confidence sufficient: {highest_similarity:.4f} >= {routing_threshold:.4f}")
+        print(f"Answering from {len(docs)} documents...\n")
 
         if verbose:
             print("Retrieved Documents:")
             for idx, doc in enumerate(docs, 1):
-                print(f"\n{idx}. {doc.metadata['title']} (Similarity: {doc.metadata['similarity']:.2%})")
+                print(f"\n{idx}. {doc.metadata['title']}")
+                print(f"   Similarity: {doc.metadata['similarity']:.4f} ({doc.metadata['similarity']:.2%})")
                 print(f"   URL: {doc.metadata['url']}")
                 print(f"   Type: {doc.metadata['page_type']}")
                 print(f"   Preview: {doc.page_content[:200]}...")
@@ -175,6 +238,9 @@ def ask_question(question: str, threshold: float = 0.5, limit: int = 5, verbose:
 
         # Generate answer
         print("Generating answer with LLM...\n")
+
+        # Create RAG chain with proper threshold
+        rag_chain, _ = create_rag_chain(threshold=threshold, k=limit)
         answer = rag_chain.invoke(question)
 
         # Display answer
@@ -188,8 +254,9 @@ def ask_question(question: str, threshold: float = 0.5, limit: int = 5, verbose:
         print("SOURCES")
         print("=" * 80)
         for idx, doc in enumerate(docs, 1):
-            print(f"{idx}. {doc.metadata['title']} (Similarity: {doc.metadata['similarity']:.2%})")
-            print(f"   {doc.metadata['url']}")
+            print(f"{idx}. {doc.metadata['title']}")
+            print(f"   Similarity: {doc.metadata['similarity']:.4f} ({doc.metadata['similarity']:.2%})")
+            print(f"   URL: {doc.metadata['url']}")
         print("=" * 80)
 
     except Exception as e:
@@ -206,25 +273,46 @@ def ask_question(question: str, threshold: float = 0.5, limit: int = 5, verbose:
 def main():
     """Main function."""
     parser = argparse.ArgumentParser(
-        description='Ask questions about scraped policies using RAG with LangChain',
+        description='Ask questions with intelligent routing between RAG and Google search',
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
+  # Privacy policy question (likely uses RAG)
   python rag_query.py "How do companies handle GDPR compliance?"
-  python rag_query.py "What is the data retention policy?" --threshold 0.6
+
+  # Product question (likely uses Google search)
+  python rag_query.py "What is the latest iPhone model?"
+
+  # Custom thresholds
+  python rag_query.py "What is the data retention policy?" --threshold 0.6 --routing-threshold 0.8
+
+  # Verbose mode to see routing decision details
   python rag_query.py "Do companies share data with third parties?" --limit 3 --verbose
+
+Routing Logic:
+  1. Question is converted to embedding
+  2. Similarity computed with all policy documents in database
+  3. If highest similarity >= routing_threshold (default 0.75): Use RAG
+  4. If highest similarity < routing_threshold: Suggest Google search
         """
     )
 
     parser.add_argument(
         'question',
-        help='Your question about the policies'
+        help='Your question (can be about policies or anything else)'
     )
     parser.add_argument(
         '--threshold',
         type=float,
         default=0.5,
         help='Minimum similarity threshold for retrieval (0-1, default: 0.5)'
+    )
+    parser.add_argument(
+        '--routing-threshold',
+        type=float,
+        default=0.75,
+        help='Similarity threshold for routing decision (0-1, default: 0.75). '
+             'Questions with similarity >= this value use RAG, otherwise Google search'
     )
     parser.add_argument(
         '--limit',
@@ -235,7 +323,7 @@ Examples:
     parser.add_argument(
         '--verbose',
         action='store_true',
-        help='Show retrieved documents before answer'
+        help='Show retrieved documents and routing decision details'
     )
 
     args = parser.parse_args()
@@ -244,7 +332,13 @@ Examples:
         parser.print_help()
         return
 
-    ask_question(args.question, args.threshold, args.limit, args.verbose)
+    ask_question(
+        args.question,
+        args.threshold,
+        args.limit,
+        args.verbose,
+        args.routing_threshold
+    )
 
 
 if __name__ == "__main__":
