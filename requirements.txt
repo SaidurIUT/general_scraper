@@ -1,6 +1,12 @@
+# scraper_service/requirements.txt
+# Install with: pip install -r requirements.txt --break-system-packages
+# Or inside your existing venv: pip install -r requirements.txt
+
+fastapi==0.115.0
+uvicorn[standard]==0.30.6
+aiohttp==3.10.5
 crawl4ai
 pydantic
 python-dotenv
 beautifulsoup4
 lxml
-aiohttp

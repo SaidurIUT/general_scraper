@@ -13,5 +13,5 @@ def get_browser_config():
     return BrowserConfig(
         browser_type="chromium",
         headless=True,  # Set to False to see browser UI during debugging
-        verbose=True
+        verbose=False,
     )
